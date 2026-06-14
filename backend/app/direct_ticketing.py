@@ -17,6 +17,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TICKET_PICTURE_DIR = PROJECT_ROOT / "picture"
+# 默认微信小程序 UA，请求影院接口时需要模拟小程序环境
 DEFAULT_WECHAT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 "
@@ -24,6 +25,7 @@ DEFAULT_WECHAT_USER_AGENT = (
     "MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) "
     "UnifiedPCWindowsWechat(0xf2541a1f) XWEB/19921"
 )
+# 影院接口公共请求头，后续锁座、查价、会员支付都复用
 DEFAULT_CINEMA_HEADERS = {
     "Content-Type": "application/json",
     "Accept": "*/*",
@@ -52,6 +54,7 @@ class ResolvedSeat:
 
 @dataclass
 class MatchCriteria:
+    # 用户下单时的匹配条件：影片、日期、座位、openId、影厅偏好等
     movie_name: str
     start_date: str
     end_date: str
@@ -239,6 +242,7 @@ def criteria_from_order(order: dict[str, Any]) -> MatchCriteria:
 
 
 class SessionMatcher:
+    # 根据用户条件筛选和排序可用场次
     def __init__(self, criteria: MatchCriteria, now: datetime | None = None):
         self.criteria = criteria
         self.now = now or datetime.now()
@@ -301,6 +305,8 @@ class SessionMatcher:
 
 
 class SpecifiedSeatResolver:
+    # 根据用户指定的“几排几号”，从座位图中找到真实 seatCode 
+    #  并结合座位状态判断该座位是否可锁
     def resolve(
         self,
         requested_positions: list[str],
@@ -388,7 +394,7 @@ class CinemaApiClient:
         self.lock_path = lock_path
         self.ticket_picture_dir = DEFAULT_TICKET_PICTURE_DIR
         self.trace: list[dict[str, Any]] = []
-
+# 查询指定日期范围内的电影场次
     def query_sessions(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
         payload = self._request_json(
             "POST",
@@ -398,23 +404,25 @@ class CinemaApiClient:
             step="query_sessions",
         )
         return _extract_list(payload)
-
+# 查询某个场次下每个座位的实时状态，例如可售、已售、已锁
     def query_session_seats(self, plan_code: str) -> list[dict[str, Any]]:
         path = f"/JavaWeb2/api/net/QuerySessionSeat?PlanCode={urllib.parse.quote(plan_code)}"
         items = _extract_list(self._request_json("GET", path, headers={"cinemaCode": self.cinema_code}, step="query_session_seats"))
         if len(items) == 1 and isinstance(items[0].get("Seats"), list):
             return [seat for seat in items[0]["Seats"] if isinstance(seat, dict)]
         return items
-
+# 查询影厅座位图，用于把“7排11号”解析成真实 seatCode
     def query_seat_map(self, screen_code: str) -> list[dict[str, Any]]:
         path = f"/JavaWeb2/api/net/QuerySeat?ScreenCode={urllib.parse.quote(screen_code)}"
         return _extract_list(self._request_json("GET", path, headers={"cinemaCode": self.cinema_code}, step="query_seat_map"))
-
+# 调用锁座接口，成功后会返回 orderCode、channelOrderCode、座位信息和自动解锁时间
     def lock_seats(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = self._request_json("POST", self.lock_path, body=payload, headers={"cinemaCode": self.cinema_code}, step="lock_seats")
         return self._normalize_lock_response(response)
 
     # 会员价接口的参数名叫 orderNo，但这里传的是锁座返回的数字 orderCode。
+    # 查询会员价接口 
+    # 当前代码里传入什么取决于 pay_by_member_card 中 order_no 的赋值
     def query_member_price_by_order_no(self, order_no: str, card_code: str) -> dict[str, Any]:
         query = urllib.parse.urlencode({"orderNo": order_no, "cardCode": card_code})
         return self._request_json(
@@ -774,7 +782,7 @@ class DirectTicketRunner:
     def __init__(self, client: Any, now: datetime | None = None):
         self.client = client
         self.now = now or datetime.now()
-
+# 主运行流程： # 1. 查询场次 # 2. 匹配符合条件的场次 # 3. 查询座位图和座位状态 # 4. 解析指定座位 # 5. 构造锁座参数 # 6. 非 dry_run 时调用锁座 # 7. 如果传了 member_card，则继续执行会员卡支付
     def run(self, criteria: MatchCriteria, dry_run: bool = True, member_card: dict[str, Any] | None = None) -> dict[str, Any]:
         sessions = self.client.query_sessions(criteria.start_date, criteria.end_date)
         candidates = SessionMatcher(criteria, now=self.now).match(sessions)
@@ -802,11 +810,12 @@ class DirectTicketRunner:
                     "error": None,
                 }
             )
-
+# dry_run 只构造参数和模拟结果，不真正锁座、不支付
             if dry_run:
                 return self._success_result(session, seats, payload, {"order_no": "DRY-RUN", "expire_time": None, "raw": None}, True)
 
             lock_result = self.client.lock_seats(payload)
+            # 锁座成功后，如果提供了会员卡信息，则继续走会员支付
             if lock_result.get("success"):
                 result = self._success_result(session, seats, payload, lock_result, False)
                 if member_card:
@@ -827,7 +836,7 @@ class DirectTicketRunner:
             "attempted_sessions": attempted_sessions,
             "trace": self._trace(),
         }
-
+# 根据场次和座位生成锁座接口 body # SeatCode 来自座位图解析结果 # SessionCode 使用场次 PlanCode # openId 使用用户传入的 openId
     def build_lock_payload(self, criteria: MatchCriteria, session: dict[str, Any], seats: list[ResolvedSeat]) -> dict[str, Any]:
         return {
             "Count": len(seats),
