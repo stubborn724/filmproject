@@ -1,0 +1,8 @@
+{
+  "movie_name": "给阿嬷的情书",
+  "date": "2026-06-14",
+  "ticket_count": 1,
+  "expectedTime": "14:30",
+  "seat_positions": ["5排9号"],
+  "priceMax": 80
+}
