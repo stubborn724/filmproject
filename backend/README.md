@@ -54,7 +54,7 @@ The script builds the captured payload shape:
 {
   "Count": 1,
   "SessionCode": "0526061100171947",
-  "openId": "oiQcn5AJxwoWAya8SNqBXDVXwZNA",
+  "openId": "用自己的openid",
   "distributorId": "",
   "Seat": [
     {

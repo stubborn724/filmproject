@@ -30,3 +30,4 @@ cd E:\filmproject\backend
 ```
 
 Open `http://127.0.0.1:8000/` to enter the ticket order in a browser. `openId` and the member card password are read from `backend/config.direct_ticketing.example.json`; the card number is queried automatically from `batchMemberCard`.
+搜索文件中的“用自己的openid”改一下

@@ -50,7 +50,7 @@ class TicketApiTests(unittest.TestCase):
         args, kwargs = runner_cls.return_value.run.call_args
         self.assertTrue(kwargs["dry_run"])
         self.assertEqual(args[0].seat_positions, ["5排9号"])
-        self.assertEqual(args[0].open_id, "oiQcn5AJxwoWAya8SNqBXDVXwZNA")
+        self.assertEqual(args[0].open_id, "用自己的openid")
 
     @patch("app.api.ticket.DirectTicketRunner")
     @patch("app.api.ticket.CinemaApiClient")
@@ -65,7 +65,7 @@ class TicketApiTests(unittest.TestCase):
         self.assertFalse(kwargs["dry_run"])
         self.assertEqual(kwargs["member_card"], {"password": "240279"})
         self.assertEqual(args[0].expected_time, "14:30")
-        self.assertEqual(args[0].open_id, "oiQcn5AJxwoWAya8SNqBXDVXwZNA")
+        self.assertEqual(args[0].open_id, "用自己的openid")
 
     def test_invalid_input_returns_controlled_error(self):
         payload = dict(self.order_payload)
