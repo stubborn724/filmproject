@@ -34,16 +34,16 @@
     "distributorId": ""
   },
   "account": {
-    "openId": "本地配置中填写固定值",
-    "memberCardPassword": "填写会员卡密码"
+    "openId": "oiQcn5AJxwoWAya8SNqBXDVXwZNA",
+    "memberCardPassword": "240279"
   },
   "order": {
-    "movieName": "电影名称",
+    "movieName": "给阿姨的情书",
     "showDate": "2026-06-19",
     "startTime": "14:30",
-    "hallName": "",
-    "filmLanguage": "",
-    "showType": "",
+    "hallName": "2号厅",
+    "filmLanguage": "国语",
+    "showType": "普通2D",
     "seatNames": ["5排9号"],
     "priceMax": 80
   },
@@ -54,7 +54,7 @@
 }
 ```
 
-`config.example.json` 保存脱敏模板，`config.local.json` 保存本地实际值并被 Git 忽略。标准微信小程序请求头由程序生成；允许通过可选配置覆盖公共请求头和接口路径。订单票数由 `seatNames` 自动推导。
+`config.example.json` 保存带完整订单示例的脱敏模板，`config.local.json` 保存上述本地实际账号值并被 Git 忽略。标准微信小程序请求头由程序生成；允许通过可选配置覆盖公共请求头。订单票数由 `seatNames` 自动推导。
 
 ## 请求参数配置化
 
