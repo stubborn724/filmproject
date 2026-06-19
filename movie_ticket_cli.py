@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from backend.app.direct_ticketing import (
+from direct_ticketing import (
     CinemaApiClient,
     DirectTicketRunner,
     DirectTicketingError,

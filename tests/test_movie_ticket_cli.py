@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.app.direct_ticketing import DirectTicketingError
+from direct_ticketing import DirectTicketingError
 from movie_ticket_cli import load_purchase_settings
 import movie_ticket_cli
 
@@ -189,6 +189,8 @@ class OrchestrationTests(unittest.TestCase):
 class ProjectStructureTests(unittest.TestCase):
     def test_project_has_cli_entry_and_no_fastapi_entry(self):
         self.assertTrue((PROJECT_ROOT / "movie_ticket_cli.py").exists())
+        self.assertTrue((PROJECT_ROOT / "direct_ticketing.py").exists())
+        self.assertFalse((PROJECT_ROOT / "backend").exists())
         self.assertFalse((PROJECT_ROOT / "backend/app/main.py").exists())
         self.assertFalse((PROJECT_ROOT / "backend/app/api/ticket.py").exists())
         self.assertFalse((PROJECT_ROOT / "backend/tests/test_ticket_api.py").exists())

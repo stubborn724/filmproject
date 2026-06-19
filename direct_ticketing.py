@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_TICKET_PICTURE_DIR = PROJECT_ROOT / "picture"
 # 默认微信小程序 UA，请求影院接口时需要模拟小程序环境
 DEFAULT_WECHAT_USER_AGENT = (

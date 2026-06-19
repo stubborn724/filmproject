@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from backend.app.direct_ticketing import (
+from direct_ticketing import (
     CinemaApiClient,
     DirectTicketRunner,
     DirectTicketingError,
@@ -669,6 +669,7 @@ class FakeClient:
 class FakeMemberPaymentClient(CinemaApiClient):
     def __init__(self, balance=100, price_items=None, picture_dir=None):
         super().__init__("https://example.invalid", cinema_code="34025901")
+        self.write_picture = picture_dir is not None
         self.balance = balance
         self.price_items = price_items or [
             {
@@ -685,6 +686,11 @@ class FakeMemberPaymentClient(CinemaApiClient):
         self.confirm_calls = []
         self.card_list_queries = []
         self.order_queries = []
+
+    def save_ticket_picture(self, order_result):
+        if not self.write_picture:
+            return "TEST-TICKET.svg"
+        return super().save_ticket_picture(order_result)
 
     def query_member_cards(self, open_id: str):
         self.card_list_queries.append(open_id)
