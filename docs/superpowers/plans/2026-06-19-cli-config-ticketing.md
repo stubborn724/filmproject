@@ -110,7 +110,7 @@ runner.run(criteria, dry_run=True, member_card=None)
 and default execution calls:
 
 ```python
-runner.run(criteria, dry_run=False, member_card={"password": "240279"})
+runner.run(criteria, dry_run=False, member_card={"password": "TEST-PASSWORD"})
 ```
 
 Assert the configured relative output directory is assigned to the client and the result is printed as UTF-8 JSON.
@@ -152,7 +152,7 @@ Expected: constructor rejects `ticket_picture_dir` or still uses the old default
 
 - [ ] **Step 3: Implement relative path support and configs**
 
-Accept `ticket_picture_dir: Path` in `CinemaApiClient`. Add a sanitized `config.example.json` with `给阿姨的情书`, `2026-06-19`, `14:30`, `2号厅`, `国语`, `普通2D`, `5排9号`, and price `80`. Add ignored `config.local.json` with cinema code `34025901`, the `wx52420337e5796bd6/15` referer, fixed `openId`, and password `240279`.
+Accept `ticket_picture_dir: Path` in `CinemaApiClient`. Add a sanitized `config.example.json` with `给阿姨的情书`, `2026-06-19`, `14:30`, `2号厅`, `国语`, `普通2D`, `5排9号`, and price `80`. Add ignored `config.local.json` with cinema code `34025901`, the `wx52420337e5796bd6/15` referer, and the user-provided fixed local credentials.
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
@@ -198,7 +198,7 @@ python .\movie_ticket_cli.py
 
 - [ ] **Step 3: Scan for stale absolute paths and web references**
 
-Run PowerShell `Select-String` over tracked source/docs for `E:\\filmproject`, `E:\\filmproject2`, `uvicorn`, `FastAPI`, and `http://127.0.0.1:8000`.
+Run PowerShell `Select-String` over active source and documentation for drive-qualified project paths, `uvicorn`, `FastAPI`, and the retired local web-server URL.
 
 Expected: no matches in active README, code, or configuration files; historical design documents may describe removed behavior but must not contain machine-specific runtime paths.
 

@@ -34,8 +34,8 @@
     "distributorId": ""
   },
   "account": {
-    "openId": "oiQcn5AJxwoWAya8SNqBXDVXwZNA",
-    "memberCardPassword": "240279"
+    "openId": "本地配置使用用户提供的固定值",
+    "memberCardPassword": "本地配置使用用户提供的密码"
   },
   "order": {
     "movieName": "给阿姨的情书",
@@ -66,7 +66,7 @@
 
 - 默认配置文件路径相对于 CLI 脚本目录。
 - `runtime.outputDir` 等配置中的相对路径以配置文件所在目录为基准解析。
-- README、命令示例、默认图片目录和程序常量不包含 `E:\\filmproject`、`E:\\filmproject2` 等本机绝对路径。
+- README、命令示例、默认图片目录和程序常量不包含任何绑定本机盘符的绝对路径。
 - 测试使用临时目录，不依赖固定盘符或用户名。
 
 ## 错误处理与敏感信息

@@ -1,0 +1,28 @@
+{
+  "miniProgram": {
+    "baseUrl": "https://pandl.xyz",
+    "cinemaCode": "34025901",
+    "referer": "https://servicewechat.com/wx52420337e5796bd6/15/page-frame.html",
+    "distributorId": ""
+  },
+  "account": {
+    "openId": "填写该小程序对应的固定 openId",
+    "memberCardPassword": "填写会员卡密码"
+  },
+  "order": {
+    "movieName": "给阿嬷的情书",
+    "showDate": "2026-06-19",
+    "startTime": "19:20",
+    "hallName": "6号LMAX巨幕厅",
+    "filmLanguage": "普通话",
+    "showType": "2D",
+    "seatNames": [
+      "5排9号"
+    ],
+    "priceMax": 80
+  },
+  "runtime": {
+    "timeout": 20,
+    "outputDir": "picture"
+  }
+}

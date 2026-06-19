@@ -145,7 +145,7 @@ Show `seat_positions` and `openId`.
 Run:
 
 ```powershell
-cd E:\filmproject\backend
+cd backend
 python -m unittest tests.test_direct_ticketing
 python scripts\lock_movie_ticket.py --config config.direct_ticketing.example.json --order-json order.example.json --dry-run --pretty
 ```

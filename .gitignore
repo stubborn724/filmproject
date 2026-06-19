@@ -18,6 +18,8 @@ Thumbs.db
 .DS_Store
 
 # Project exclusions
+config.local.json
+picture/
 backend/uploads/
 backend/screenshots/
 backend/logs/

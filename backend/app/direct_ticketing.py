@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import date, datetime, time
 from html import escape as xml_escape
 from pathlib import Path
 from typing import Any
@@ -68,7 +68,7 @@ class MatchCriteria:
     language_keywords: list[str] = field(default_factory=list)
     show_type_keywords: list[str] = field(default_factory=list)
     price_limit: float | None = None
-    cinema_code: str = "34025901"
+    cinema_code: str = ""
     distributor_id: str = ""
 
 
@@ -122,6 +122,21 @@ def _parse_datetime(value: Any) -> datetime | None:
             return datetime.strptime(text, fmt)
         except ValueError:
             pass
+    return None
+
+
+def _parse_date(value: Any) -> date | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            pass
+    match = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日?", text)
+    if match:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
     return None
 
 
@@ -220,6 +235,10 @@ def criteria_from_order(order: dict[str, Any]) -> MatchCriteria:
     if not open_id:
         raise DirectTicketingError("order must include openId")
 
+    cinema_code = str(_first_value(order, ("cinema_code", "cinemaCode"), "")).strip()
+    if not cinema_code:
+        raise DirectTicketingError("order must include cinemaCode")
+
     return MatchCriteria(
         movie_name=str(_first_value(order, ("movie_name", "movieName", "filmName", "film_name"), "")),
         start_date=start_date,
@@ -236,7 +255,7 @@ def criteria_from_order(order: dict[str, Any]) -> MatchCriteria:
         price_limit=_to_float(_first_value(order, ("price_limit", "priceLimit", "priceMax", "max_price"), None), 0)
         if _first_value(order, ("price_limit", "priceLimit", "priceMax", "max_price"), None) is not None
         else None,
-        cinema_code=str(_first_value(order, ("cinema_code", "cinemaCode"), "34025901")),
+        cinema_code=cinema_code,
         distributor_id=str(_first_value(order, ("distributorId", "distributor_id"), "")),
     )
 
@@ -262,6 +281,13 @@ class SessionMatcher:
 
         start_time = _parse_datetime(_first_value(session, ("StartTime", "startTime")))
         if not start_time:
+            return False
+
+        start_date = _parse_date(self.criteria.start_date)
+        end_date = _parse_date(self.criteria.end_date)
+        if start_date and start_time.date() < start_date:
+            return False
+        if end_date and start_time.date() > end_date:
             return False
 
         stop_time = _parse_datetime(_first_value(session, ("NetSaleStopTime", "netSaleStopTime")))
@@ -382,17 +408,18 @@ class CinemaApiClient:
     def __init__(
         self,
         base_url: str,
-        cinema_code: str = "34025901",
+        cinema_code: str,
         headers: dict[str, str] | None = None,
         timeout: int = 20,
         lock_path: str = "/JavaWeb2/api/order/v1/lockSeat",
+        ticket_picture_dir: Path | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.cinema_code = cinema_code
         self.headers = {**DEFAULT_CINEMA_HEADERS, **(headers or {})}
         self.timeout = timeout
         self.lock_path = lock_path
-        self.ticket_picture_dir = DEFAULT_TICKET_PICTURE_DIR
+        self.ticket_picture_dir = Path(ticket_picture_dir) if ticket_picture_dir is not None else DEFAULT_TICKET_PICTURE_DIR
         self.trace: list[dict[str, Any]] = []
 # 查询指定日期范围内的电影场次
     def query_sessions(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
@@ -420,9 +447,7 @@ class CinemaApiClient:
         response = self._request_json("POST", self.lock_path, body=payload, headers={"cinemaCode": self.cinema_code}, step="lock_seats")
         return self._normalize_lock_response(response)
 
-    # 会员价接口的参数名叫 orderNo，但这里传的是锁座返回的数字 orderCode。
-    # 查询会员价接口 
-    # 当前代码里传入什么取决于 pay_by_member_card 中 order_no 的赋值
+    # 会员价接口的参数名叫 orderNo，实际要传锁座返回的 channelOrderCode。
     def query_member_price_by_order_no(self, order_no: str, card_code: str) -> dict[str, Any]:
         query = urllib.parse.urlencode({"orderNo": order_no, "cardCode": card_code})
         return self._request_json(
@@ -479,17 +504,17 @@ class CinemaApiClient:
         member_card = member_card or {}
         user = user or {}
         lock_data = self._extract_lock_data(lock_seat_result)
-        # channelOrderCode 是 GP 开头的渠道号；当前支付链路用数字 orderCode 作为 orderNo。
-        channel_order_code = lock_data.get("channelOrderCode")
-        order_no = str(lock_data.get("orderCode") or "")
+        # channelOrderCode 是支付链路使用的 orderNo；orderCode 是支付成功后查出票用的数字订单号。
+        payment_order_no = str(lock_data.get("channelOrderCode") or "")
+        ticket_order_code = str(lock_data.get("orderCode") or "")
         seats = lock_data.get("seats") if isinstance(lock_data.get("seats"), list) else []
         seat = seats[0] if seats else None
         card_code = str(member_card.get("cardCode") or "")
         password = str(member_card.get("password") or "")
         open_id = str(user.get("openId") or "")
 
-        if not order_no:
-            return self._member_payment_failure("lock_seat_result", "missing orderCode in lock response", lock_seat_result)
+        if not payment_order_no:
+            return self._member_payment_failure("lock_seat_result", "missing channelOrderCode in lock response", lock_seat_result)
         if not seat:
             return self._member_payment_failure("lock_seat_result", "missing seats in lock response", lock_seat_result)
         if not password or not open_id:
@@ -509,7 +534,7 @@ class CinemaApiClient:
                 return self._member_payment_failure("batch_member_card", self._response_reason(card_list_result), card_list_result)
 
         try:
-            price_result = self.query_member_price_by_order_no(order_no, card_code)
+            price_result = self.query_member_price_by_order_no(payment_order_no, card_code)
         except DirectTicketingError as exc:
             return self._member_payment_failure("query_member_price", str(exc), None)
         price_payload = price_result.get("data") if isinstance(price_result, dict) else None
@@ -529,8 +554,9 @@ class CinemaApiClient:
         # 多座位时余额要按所有座位的会员价和服务费合计校验。
         total_sales = sum(_to_float(item.get("memberPrice"), 0) + _to_float(item.get("serviceFee"), 0) for item in price_items)
         confirmation = {
-            "orderNo": order_no,
-            "channelOrderCode": channel_order_code,
+            "orderNo": payment_order_no,
+            "orderCode": ticket_order_code,
+            "channelOrderCode": payment_order_no,
             "cardCode": card_code,
             "seat": seat,
             "memberPrice": price_items[0].get("memberPrice"),
@@ -561,7 +587,7 @@ class CinemaApiClient:
         # 到这里才发起真实支付；queryMemberCardInfo 只是前置校验。
         confirm_payload = {
             "openId": open_id,
-            "orderNo": order_no,
+            "orderNo": payment_order_no,
             "password": password,
             "orderPhone": order_phone,
             "cardCode": card_code,
@@ -573,11 +599,11 @@ class CinemaApiClient:
             return self._member_payment_failure("member_order_confirm", str(exc), None, confirmation)
         if not _api_success(confirm_result):
             return self._member_payment_failure("member_order_confirm", self._response_reason(confirm_result), confirm_result, confirmation)
-        if not order_no:
+        if not ticket_order_code:
             return self._member_payment_failure("query_order", "missing orderCode in lock response", lock_seat_result, confirmation)
         try:
             # 支付后立即查出票信息，并将取票码保存为本地 SVG 图片。
-            order_result = self.query_order(order_no)
+            order_result = self.query_order(ticket_order_code)
         except DirectTicketingError as exc:
             return self._member_payment_failure("query_order", str(exc), None, confirmation)
         if not _api_success(order_result):
@@ -784,7 +810,8 @@ class DirectTicketRunner:
         self.now = now or datetime.now()
 # 主运行流程： # 1. 查询场次 # 2. 匹配符合条件的场次 # 3. 查询座位图和座位状态 # 4. 解析指定座位 # 5. 构造锁座参数 # 6. 非 dry_run 时调用锁座 # 7. 如果传了 member_card，则继续执行会员卡支付
     def run(self, criteria: MatchCriteria, dry_run: bool = True, member_card: dict[str, Any] | None = None) -> dict[str, Any]:
-        sessions = self.client.query_sessions(criteria.start_date, criteria.end_date)
+        query_start_date, query_end_date = self._validate_criteria_dates(criteria)
+        sessions = self.client.query_sessions(query_start_date, query_end_date)
         candidates = SessionMatcher(criteria, now=self.now).match(sessions)
         attempted_sessions = [self._session_summary(session) for session in candidates]
 
@@ -889,6 +916,17 @@ class DirectTicketRunner:
             "start_time": _first_value(session, ("StartTime", "startTime")),
             "price": _first_value(session, ("channelPrice", "WxPayPrice", "LowestPrice", "price", "Price")),
         }
+
+    def _validate_criteria_dates(self, criteria: MatchCriteria) -> tuple[str, str]:
+        start_date = _parse_date(criteria.start_date)
+        end_date = _parse_date(criteria.end_date)
+        if not start_date:
+            raise DirectTicketingError(f"invalid start_date: {criteria.start_date}")
+        if not end_date:
+            raise DirectTicketingError(f"invalid end_date: {criteria.end_date}")
+        if start_date > end_date:
+            raise DirectTicketingError(f"start_date {criteria.start_date} is after end_date {criteria.end_date}")
+        return start_date.isoformat(), end_date.isoformat()
 
     def _trace(self) -> list[dict[str, Any]]:
         return list(getattr(self.client, "trace", []))

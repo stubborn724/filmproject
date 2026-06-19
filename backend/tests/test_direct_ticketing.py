@@ -4,9 +4,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from app.direct_ticketing import (
+from backend.app.direct_ticketing import (
     CinemaApiClient,
     DirectTicketRunner,
+    DirectTicketingError,
     MatchCriteria,
     SeatUnavailableError,
     SpecifiedSeatResolver,
@@ -16,6 +17,57 @@ from app.direct_ticketing import (
 
 
 class DirectTicketingTests(unittest.TestCase):
+    def test_criteria_requires_configured_cinema_code(self):
+        with self.assertRaisesRegex(DirectTicketingError, "cinemaCode"):
+            criteria_from_order(
+                {
+                    "filmName": "Target Movie",
+                    "date": "2026-06-14",
+                    "showTime": "14:30",
+                    "seat_positions": ["5排9号"],
+                    "openId": "OPEN-1",
+                }
+            )
+
+    def test_client_requires_configured_cinema_code(self):
+        with self.assertRaisesRegex(TypeError, "cinema_code"):
+            CinemaApiClient("https://example.invalid")
+
+    def test_client_uses_configured_ticket_picture_directory(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_dir = Path(temporary_directory) / "relative-picture"
+
+            client = CinemaApiClient(
+                "https://example.invalid",
+                cinema_code="34025901",
+                ticket_picture_dir=output_dir,
+            )
+
+            self.assertEqual(client.ticket_picture_dir, output_dir)
+
+    def test_all_api_methods_use_configured_cinema_code_and_referer(self):
+        referer = "https://servicewechat.com/wxe12fb00c6ff657c2/25/page-frame.html"
+        client = CapturingRequestClient(
+            "https://example.invalid",
+            cinema_code="21010931",
+            headers={"Referer": referer},
+        )
+
+        client.query_sessions("2026-06-19", "2026-06-19")
+        client.query_session_seats("PLAN-1")
+        client.query_seat_map("SCREEN-1")
+        client.lock_seats({"Seat": []})
+        client.query_member_price_by_order_no("GP-1", "CARD-1")
+        client.query_member_cards("OPEN-1")
+        client.query_member_card_info("CARD-1", "PWD-1")
+        client.member_order_confirm({"orderNo": "GP-1"})
+        client.query_order("ORDER-1")
+
+        self.assertEqual(client.headers["Referer"], referer)
+        self.assertEqual(len(client.calls), 9)
+        for call in client.calls:
+            self.assertEqual(call["headers"], {"cinemaCode": "21010931"})
+
     def test_criteria_from_order_accepts_specified_seats_and_open_id(self):
         criteria = criteria_from_order(
             {
@@ -25,6 +77,7 @@ class DirectTicketingTests(unittest.TestCase):
                 "tickets": 1,
                 "seat_positions": ["5排9号"],
                 "openId": "OPEN-1",
+                "cinemaCode": "34025901",
             }
         )
 
@@ -35,6 +88,7 @@ class DirectTicketingTests(unittest.TestCase):
         self.assertEqual(criteria.ticket_count, 1)
         self.assertEqual(criteria.seat_positions, ["5排9号"])
         self.assertEqual(criteria.open_id, "OPEN-1")
+        self.assertEqual(criteria.cinema_code, "34025901")
 
     def test_session_matcher_filters_and_sorts_candidate_sessions(self):
         sessions = [
@@ -82,6 +136,122 @@ class DirectTicketingTests(unittest.TestCase):
         matched = SessionMatcher(criteria, now=datetime(2026, 6, 14, 12, 0, 0)).match(sessions)
 
         self.assertEqual([session["PlanCode"] for session in matched], ["P1"])
+
+    def test_session_matcher_rejects_sessions_outside_requested_date(self):
+        sessions = [
+            {
+                "filmName": "Target Movie",
+                "PlanCode": "WRONG-DAY",
+                "status": "可销售",
+                "StartTime": "2026-06-16 14:30:00",
+                "NetSaleStopTime": "2026-06-16 14:20:00",
+                "channelPrice": "35.00",
+            },
+            {
+                "filmName": "Target Movie",
+                "PlanCode": "RIGHT-DAY",
+                "status": "可销售",
+                "StartTime": "2026-06-17 14:30:00",
+                "NetSaleStopTime": "2026-06-17 14:20:00",
+                "channelPrice": "35.00",
+            },
+        ]
+        criteria = MatchCriteria(
+            movie_name="Target Movie",
+            start_date="2026-06-17",
+            end_date="2026-06-17",
+            ticket_count=1,
+            expected_time="14:30",
+            seat_positions=["5排9号"],
+            open_id="OPEN-1",
+        )
+
+        matched = SessionMatcher(criteria, now=datetime(2026, 6, 15, 12, 0, 0)).match(sessions)
+
+        self.assertEqual([session["PlanCode"] for session in matched], ["RIGHT-DAY"])
+
+    def test_session_matcher_filters_arbitrary_future_date_range(self):
+        sessions = [
+            {
+                "filmName": "Target Movie",
+                "PlanCode": "BEFORE-RANGE",
+                "status": "可销售",
+                "StartTime": "2026-12-30 14:30:00",
+                "NetSaleStopTime": "2026-12-30 14:20:00",
+                "channelPrice": "35.00",
+            },
+            {
+                "filmName": "Target Movie",
+                "PlanCode": "IN-RANGE-1",
+                "status": "可销售",
+                "StartTime": "2026-12-31 14:30:00",
+                "NetSaleStopTime": "2026-12-31 14:20:00",
+                "channelPrice": "35.00",
+            },
+            {
+                "filmName": "Target Movie",
+                "PlanCode": "IN-RANGE-2",
+                "status": "可销售",
+                "StartTime": "2027-01-01 14:30:00",
+                "NetSaleStopTime": "2027-01-01 14:20:00",
+                "channelPrice": "35.00",
+            },
+            {
+                "filmName": "Target Movie",
+                "PlanCode": "AFTER-RANGE",
+                "status": "可销售",
+                "StartTime": "2027-01-02 14:30:00",
+                "NetSaleStopTime": "2027-01-02 14:20:00",
+                "channelPrice": "35.00",
+            },
+        ]
+        criteria = MatchCriteria(
+            movie_name="Target Movie",
+            start_date="2026-12-31",
+            end_date="2027-01-01",
+            ticket_count=1,
+            expected_time="14:30",
+            seat_positions=["5排9号"],
+            open_id="OPEN-1",
+        )
+
+        matched = SessionMatcher(criteria, now=datetime(2026, 12, 1, 12, 0, 0)).match(sessions)
+
+        self.assertEqual([session["PlanCode"] for session in matched], ["IN-RANGE-1", "IN-RANGE-2"])
+
+    def test_runner_rejects_unparseable_requested_date_before_querying_sessions(self):
+        client = FakeClient()
+        criteria = MatchCriteria(
+            movie_name="Target Movie",
+            start_date="明天",
+            end_date="明天",
+            ticket_count=1,
+            expected_time="14:30",
+            seat_positions=["5排9号"],
+            open_id="OPEN-1",
+        )
+
+        with self.assertRaisesRegex(Exception, "invalid start_date"):
+            DirectTicketRunner(client, now=datetime(2026, 6, 15, 12, 0, 0)).run(criteria, dry_run=True)
+
+        self.assertEqual(client.lock_calls, [])
+
+    def test_runner_normalizes_chinese_requested_date_before_querying_sessions(self):
+        client = FakeClient()
+        criteria = MatchCriteria(
+            movie_name="Target Movie",
+            start_date="2026年6月14日",
+            end_date="2026年6月14日",
+            ticket_count=1,
+            expected_time="14:30",
+            seat_positions=["5排9号"],
+            open_id="OPEN-1",
+        )
+
+        result = DirectTicketRunner(client, now=datetime(2026, 6, 14, 12, 0, 0)).run(criteria, dry_run=True)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(client.session_queries, [{"start_date": "2026-06-14", "end_date": "2026-06-14"}])
 
     def test_runner_dry_run_resolves_requested_seat_and_builds_lock_payload(self):
         client = FakeClient()
@@ -199,9 +369,9 @@ class DirectTicketingTests(unittest.TestCase):
         )
 
         self.assertTrue(result["success"])
-        self.assertEqual(client.price_queries, [{"orderNo": "26061414282490067", "cardCode": "CARD-1"}])
-        self.assertEqual(client.confirm_calls[0]["orderNo"], "26061414282490067")
-        self.assertNotEqual(client.confirm_calls[0]["orderNo"], "GP26061414282490067")
+        self.assertEqual(client.price_queries, [{"orderNo": "GP26061414282490067", "cardCode": "CARD-1"}])
+        self.assertEqual(client.confirm_calls[0]["orderNo"], "GP26061414282490067")
+        self.assertEqual(client.order_queries, ["26061414282490067"])
         self.assertEqual(client.confirm_calls[0]["orderPhone"], "13800000000")
         self.assertEqual(
             client.confirm_calls[0]["orders"],
@@ -214,7 +384,8 @@ class DirectTicketingTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(result["confirmation"]["orderNo"], "26061414282490067")
+        self.assertEqual(result["confirmation"]["orderNo"], "GP26061414282490067")
+        self.assertEqual(result["confirmation"]["orderCode"], "26061414282490067")
         self.assertEqual(result["confirmation"]["channelOrderCode"], "GP26061414282490067")
         self.assertEqual(result["confirmation"]["memberPrice"], 35)
         self.assertEqual(result["confirmation"]["serviceFee"], 1)
@@ -225,7 +396,7 @@ class DirectTicketingTests(unittest.TestCase):
         lock_seat_result = {
             "code": "000",
             "data": {
-                "channelOrderCode": "CHANNEL-1",
+                "channelOrderCode": "GP26061414282490067",
                 "orderCode": "26061414282490067",
                 "autoUnlockDatetime": "2099-06-14 14:35:00",
                 "seats": [{"seatCode": "S-5-9", "seatName": "5排9号"}],
@@ -240,8 +411,9 @@ class DirectTicketingTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(client.card_list_queries, ["OPEN-1"])
-        self.assertEqual(client.price_queries, [{"orderNo": "26061414282490067", "cardCode": "CARD-1"}])
+        self.assertEqual(client.price_queries, [{"orderNo": "GP26061414282490067", "cardCode": "CARD-1"}])
         self.assertEqual(client.member_queries, [{"cardCode": "CARD-1", "password": "PWD-1"}])
+        self.assertEqual(client.confirm_calls[0]["orderNo"], "GP26061414282490067")
         self.assertEqual(client.confirm_calls[0]["cardCode"], "CARD-1")
         self.assertEqual(result["confirmation"]["cardCode"], "CARD-1")
 
@@ -282,7 +454,8 @@ class DirectTicketingTests(unittest.TestCase):
             )
 
             self.assertTrue(result["success"])
-            self.assertEqual(client.price_queries, [{"orderNo": "26061414282490067", "cardCode": "CARD-1"}])
+            self.assertEqual(client.price_queries, [{"orderNo": "GP26061414282490067", "cardCode": "CARD-1"}])
+            self.assertEqual(client.confirm_calls[0]["orderNo"], "GP26061414282490067")
             self.assertEqual(client.order_queries, ["26061414282490067"])
             self.assertEqual(
                 client.confirm_calls[0]["orders"],
@@ -376,10 +549,29 @@ class DirectTicketingTests(unittest.TestCase):
         self.assertNotIn("query_sessions", [entry["step"] for entry in result["trace"]])
 
 
+class CapturingRequestClient(CinemaApiClient):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.calls = []
+
+    def _request_json(self, method, path, body=None, headers=None, step=None):
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "body": body,
+                "headers": headers,
+                "step": step,
+            }
+        )
+        return {"code": "000", "data": []}
+
+
 class FakeClient:
     def __init__(self, blocked=False):
         self.blocked = blocked
         self.lock_calls = []
+        self.session_queries = []
         self.member_payment_calls = []
         self.trace = [
             {
@@ -395,6 +587,7 @@ class FakeClient:
         ]
 
     def query_sessions(self, start_date: str, end_date: str):
+        self.session_queries.append({"start_date": start_date, "end_date": end_date})
         return [
             {
                 "filmName": "Target Movie",
@@ -475,7 +668,7 @@ class FakeClient:
 
 class FakeMemberPaymentClient(CinemaApiClient):
     def __init__(self, balance=100, price_items=None, picture_dir=None):
-        super().__init__("https://example.invalid")
+        super().__init__("https://example.invalid", cinema_code="34025901")
         self.balance = balance
         self.price_items = price_items or [
             {
@@ -552,7 +745,7 @@ class FakeMemberPaymentClient(CinemaApiClient):
 
 class NestedSeatClient(CinemaApiClient):
     def __init__(self):
-        super().__init__("https://example.invalid")
+        super().__init__("https://example.invalid", cinema_code="34025901")
 
     def _request_json(self, method: str, path: str, body=None, headers=None, step=None):
         return {"data": [{"PlanCode": "P1", "Seats": [{"Code": "LIVE-5-9", "Status": "Available"}]}]}
